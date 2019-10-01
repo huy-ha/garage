@@ -55,7 +55,7 @@ class GaussianMLPPolicy(Policy, GaussianMLPModule):
         dist = self.forward(observation)
         return dist.log_prob(action)
 
-    def get_entropy(self, observation):
+    def entropy(self, observation):
         """Get entropy given observations."""
         dist = self.forward(observation)
         return dist.entropy()

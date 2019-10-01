@@ -1,10 +1,13 @@
-'''
-This script creates a regression test over garage-PPO and baselines-PPO.
+"""
+This script creates a regression test over
+garage-PyTorch-PPO, garage-TF-PPO and baselines-PPO2.
+It get Mujoco1M benchmarks from baselines benchmark, and test each task in
+its trial times on garage model and baselines model. For each task, there will
+be `trial` times with different random seeds. For each trial, there will be two
+log directories corresponding to baselines and garage. And there will be a plot
+plotting the average return curve from baselines and garage.
+"""
 
-Unlike garage, baselines doesn't set max_path_length. It keeps steps the action
-until it's done. So we introduced tests.wrappers.AutoStopEnv wrapper to set
-done=True when it reaches max_path_length.
-'''
 import datetime
 import multiprocessing
 import os.path as osp
@@ -20,34 +23,44 @@ from baselines.logger import configure
 from baselines.ppo2 import ppo2
 from baselines.ppo2.policies import MlpPolicy
 import dowel
-from dowel import logger as dowel_logger
+import dowel.logger as dowel_logger
 import gym
 import pytest
 import tensorflow as tf
+import torch
 
 from garage.envs import normalize
-from garage.experiment import deterministic
-from garage.tf.algos import PPO
-from garage.tf.baselines import GaussianMLPBaseline
+from garage.experiment import deterministic, LocalRunner
+from garage.np.baselines import LinearFeatureBaseline
+from garage.tf.algos import PPO as TF_PPO
 from garage.tf.envs import TfEnv
 from garage.tf.experiment import LocalTFRunner
-from garage.tf.optimizers import FirstOrderOptimizer
-from garage.tf.policies import GaussianMLPPolicy
+from garage.tf.policies import GaussianMLPPolicy as TF_GMP
+from garage.torch.algos import PPO as PyTorch_PPO
+from garage.torch.policies import GaussianMLPPolicy as PyTorch_GMP
+from tests import helpers as Rh
 from tests.fixtures import snapshot_config
-import tests.helpers as Rh
 from tests.wrappers import AutoStopEnv
+
+hyper_parameters = {
+    'hidden_sizes': [64, 64],
+    'center_adv': True,
+    'learning_rate': 3e-4,
+    'lr_clip_range': 0.2,
+    'gae_lambda': 0.97,
+    'discount': 0.99,
+    'n_epochs': 400,
+    'max_path_length': 100,
+    'batch_size': 2048,
+    'n_trials': 10
+}
 
 
 class TestBenchmarkPPO:
-    '''Compare benchmarks between garage and baselines.'''
 
     @pytest.mark.huge
     def test_benchmark_ppo(self):
-        '''
-        Compare benchmarks between garage and baselines.
-
-        :return:
-        '''
+        """Compare benchmarks between garage and baselines."""
         mujoco1m = benchmarks.get_benchmark('Mujoco1M')
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
         benchmark_dir = './data/local/benchmarks/ppo/%s/' % timestamp
@@ -56,119 +69,141 @@ class TestBenchmarkPPO:
             env_id = task['env_id']
 
             env = gym.make(env_id)
-            baseline_env = AutoStopEnv(env_name=env_id, max_path_length=100)
+            baseline_env = AutoStopEnv(
+                env_name=env_id,
+                max_path_length=hyper_parameters['max_path_length'])
 
-            seeds = random.sample(range(100), task['trials'])
+            seeds = random.sample(range(100), hyper_parameters['n_trials'])
 
             task_dir = osp.join(benchmark_dir, env_id)
             plt_file = osp.join(benchmark_dir,
                                 '{}_benchmark.png'.format(env_id))
-            baselines_csvs = []
-            garage_csvs = []
 
-            for trial in range(task['trials']):
+            baselines_csvs = []
+            garage_tf_csvs = []
+            garage_pytorch_csvs = []
+
+            for trial in range(hyper_parameters['n_trials']):
                 seed = seeds[trial]
 
                 trial_dir = task_dir + '/trial_%d_seed_%d' % (trial + 1, seed)
-                garage_dir = trial_dir + '/garage'
+                garage_tf_dir = trial_dir + '/garage/tf'
+                garage_pytorch_dir = trial_dir + '/garage/pytorch'
                 baselines_dir = trial_dir + '/baselines'
 
                 with tf.Graph().as_default():
                     # Run baselines algorithms
                     baseline_env.reset()
-                    baselines_csv = run_baselines(baseline_env, seed,
-                                                  baselines_dir)
+                    baseline_csv = run_baselines(baseline_env, seed,
+                                                 baselines_dir)
 
                     # Run garage algorithms
                     env.reset()
-                    garage_csv = run_garage(env, seed, garage_dir)
+                    garage_tf_csv = run_garage_tf(env, seed, garage_tf_dir)
 
-                garage_csvs.append(garage_csv)
-                baselines_csvs.append(baselines_csv)
+                env.reset()
+                garage_pytorch_csv = run_garage_pytorch(
+                    env, seed, garage_pytorch_dir)
+
+                baselines_csvs.append(baseline_csv)
+                garage_tf_csvs.append(garage_tf_csv)
+                garage_pytorch_csvs.append(garage_pytorch_csv)
 
             env.close()
 
-            Rh.plot(b_csvs=baselines_csvs,
-                    g_csvs=garage_csvs,
-                    g_x='Iteration',
-                    g_y='AverageReturn',
-                    g_z='Garage',
-                    b_x='nupdates',
-                    b_y='eprewmean',
-                    b_z='Baseline',
-                    trials=task['trials'],
-                    seeds=seeds,
-                    plt_file=plt_file,
-                    env_id=env_id,
-                    x_label='Iteration',
-                    y_label='AverageReturn')
+            Rh.plot_average_over_trials(
+                [baselines_csvs, garage_tf_csvs, garage_pytorch_csvs],
+                ['eprewmean', 'AverageReturn', 'AverageReturn'],
+                plt_file=plt_file,
+                env_id=env_id,
+                x_label='Iteration',
+                y_label='AverageReturn',
+                names=['baseline', 'garage-TensorFlow', 'garage-PyTorch'],
+            )
 
-            result_json[env_id] = Rh.create_json(b_csvs=baselines_csvs,
-                                                 g_csvs=garage_csvs,
-                                                 seeds=seeds,
-                                                 trails=task['trials'],
-                                                 g_x='Iteration',
-                                                 g_y='AverageReturn',
-                                                 b_x='nupdates',
-                                                 b_y='eprewmean',
-                                                 factor_g=2048,
-                                                 factor_b=2048)
+            result_json[env_id] = Rh.create_json_with_multiple_algorithms(
+                [baselines_csvs, garage_tf_csvs, garage_pytorch_csvs],
+                seeds=seeds,
+                trials=hyper_parameters['n_trials'],
+                xs=['nupdates', 'Iteration', 'Iteration'],
+                ys=['eprewmean', 'AverageReturn', 'AverageReturn'],
+                factors=[hyper_parameters['batch_size']] * 3,
+                names=['baseline', 'garage-TF', 'garage-PT'])
 
         Rh.write_file(result_json, 'PPO')
 
 
-def run_garage(env, seed, log_dir):
-    '''
-    Create garage model and training.
+def run_garage_pytorch(env, seed, log_dir):
+    """Create garage PyTorch PPO model and training."""
+    env = TfEnv(normalize(env))
 
-    Replace the ppo with the algorithm you want to run.
+    deterministic.set_seed(seed)
 
-    :param env: Environment of the task.
-    :param seed: Random seed for the trial.
-    :param log_dir: Log dir path.
-    :return:
-    '''
+    runner = LocalRunner(snapshot_config)
+
+    policy = PyTorch_GMP(env.spec,
+                         hidden_sizes=hyper_parameters['hidden_sizes'],
+                         hidden_nonlinearity=torch.tanh,
+                         output_nonlinearity=None)
+
+    baseline = LinearFeatureBaseline(env_spec=env.spec)
+
+    algo = PyTorch_PPO(env_spec=env.spec,
+                       policy=policy,
+                       optimizer=torch.optim.Adam,
+                       baseline=baseline,
+                       max_path_length=hyper_parameters['max_path_length'],
+                       discount=hyper_parameters['discount'],
+                       gae_lambda=hyper_parameters['gae_lambda'],
+                       center_adv=hyper_parameters['center_adv'],
+                       policy_lr=hyper_parameters['learning_rate'],
+                       lr_clip_range=hyper_parameters['lr_clip_range'])
+
+    # Set up logger since we are not using run_experiment
+    tabular_log_file = osp.join(log_dir, 'progress.csv')
+    dowel_logger.add_output(dowel.StdOutput())
+    dowel_logger.add_output(dowel.CsvOutput(tabular_log_file))
+    dowel_logger.add_output(dowel.TensorBoardOutput(log_dir))
+
+    runner.setup(algo, env)
+    runner.train(n_epochs=hyper_parameters['n_epochs'],
+                 batch_size=hyper_parameters['batch_size'])
+
+    dowel_logger.remove_all()
+
+    return tabular_log_file
+
+
+def run_garage_tf(env, seed, log_dir):
+    """Create garage TensorFlow PPO model and training."""
     deterministic.set_seed(seed)
 
     with LocalTFRunner(snapshot_config) as runner:
         env = TfEnv(normalize(env))
 
-        policy = GaussianMLPPolicy(
+        policy = TF_GMP(
             env_spec=env.spec,
-            hidden_sizes=(64, 64),
+            hidden_sizes=hyper_parameters['hidden_sizes'],
             hidden_nonlinearity=tf.nn.tanh,
             output_nonlinearity=None,
         )
 
-        baseline = GaussianMLPBaseline(
-            env_spec=env.spec,
-            regressor_args=dict(
-                hidden_sizes=(64, 64),
-                use_trust_region=False,
-                optimizer=FirstOrderOptimizer,
-                optimizer_args=dict(
-                    batch_size=32,
-                    max_epochs=10,
-                    tf_optimizer_args=dict(learning_rate=1e-3),
-                ),
-            ),
-        )
+        baseline = LinearFeatureBaseline(env_spec=env.spec)
 
-        algo = PPO(
-            env_spec=env.spec,
-            policy=policy,
-            baseline=baseline,
-            max_path_length=100,
-            discount=0.99,
-            gae_lambda=0.95,
-            lr_clip_range=0.2,
-            policy_ent_coeff=0.0,
-            optimizer_args=dict(
-                batch_size=32,
-                max_epochs=10,
-                tf_optimizer_args=dict(learning_rate=1e-3),
-            ),
-        )
+        algo = TF_PPO(env_spec=env.spec,
+                      policy=policy,
+                      baseline=baseline,
+                      max_path_length=hyper_parameters['max_path_length'],
+                      discount=hyper_parameters['discount'],
+                      gae_lambda=hyper_parameters['gae_lambda'],
+                      center_adv=hyper_parameters['center_adv'],
+                      lr_clip_range=hyper_parameters['lr_clip_range'],
+                      optimizer_args=dict(
+                          batch_size=None,
+                          max_epochs=1,
+                          tf_optimizer_args=dict(
+                              learning_rate=hyper_parameters['learning_rate']),
+                          verbose=True))  # yapf: disable
 
         # Set up logger since we are not using run_experiment
         tabular_log_file = osp.join(log_dir, 'progress.csv')
@@ -177,7 +212,8 @@ def run_garage(env, seed, log_dir):
         dowel_logger.add_output(dowel.TensorBoardOutput(log_dir))
 
         runner.setup(algo, env)
-        runner.train(n_epochs=488, batch_size=2048)
+        runner.train(n_epochs=hyper_parameters['n_epochs'],
+                     batch_size=hyper_parameters['batch_size'])
 
         dowel_logger.remove_all()
 
@@ -219,17 +255,17 @@ def run_baselines(env, seed, log_dir):
     policy = MlpPolicy
     ppo2.learn(policy=policy,
                env=env,
-               nsteps=2048,
-               nminibatches=32,
-               lam=0.95,
-               gamma=0.99,
-               noptepochs=10,
+               nsteps=hyper_parameters['batch_size'],
+               nminibatches=1,
+               lam=hyper_parameters['gae_lambda'],
+               gamma=hyper_parameters['discount'],
+               noptepochs=1,
                log_interval=1,
                ent_coef=0.0,
-               lr=1e-3,
-               vf_coef=0.5,
+               vf_coef=0.0,
                max_grad_norm=None,
-               cliprange=0.2,
-               total_timesteps=int(1e6))
+               lr=hyper_parameters['learning_rate'],
+               cliprange=hyper_parameters['lr_clip_range'],
+               total_timesteps=hyper_parameters['batch_size'] * hyper_parameters['n_epochs'])  # yapf: disable  # noqa: E501
 
     return osp.join(log_dir, 'progress.csv')
