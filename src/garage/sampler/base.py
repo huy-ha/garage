@@ -24,12 +24,12 @@ class Sampler(abc.ABC):
                 workers. Should be transmitted to other processes / nodes where
                 work needs to be done, then workers should be constructed
                 there.
-            agents(Agent or [Agent]): Agent(s) to use to perform rollouts. If a
-                list is passed in, it must have length exactly
+            agents(Agent or List[Agent]): Agent(s) to use to perform rollouts.
+                If a list is passed in, it must have length exactly
                 `worker_factory.n_workers`, and will be spread across the
                 workers.
-            envs(gym.Env or [gym.Env]): Environment rollouts are performed in.
-                If a list is passed in, it must have length exactly
+            envs(gym.Env or List[gym.Env]): Environment rollouts are performed
+                in. If a list is passed in, it must have length exactly
                 `worker_factory.n_workers`, and will be spread across the
                 workers.
 
@@ -71,7 +71,7 @@ class Sampler(abc.ABC):
                 spread across the workers.
 
         Returns:
-            list[dict]: A list of paths.
+            List[Dict[str, np.array]]: A list of paths.
 
         """
 

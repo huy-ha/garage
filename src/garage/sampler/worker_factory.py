@@ -59,7 +59,7 @@ class WorkerFactory:
                 creating the list.
 
         Returns:
-            list[object]: A list of length self.n_workers.
+            List[object]: A list of length self.n_workers.
 
         """
         if isinstance(objs, list):
