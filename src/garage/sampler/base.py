@@ -16,21 +16,22 @@ class Sampler(abc.ABC):
         self.env = env
 
     @classmethod
-    def construct(cls, config, agents, envs):
-        """Construct this sampler from a config.
+    def construct(cls, worker_factory, agents, envs):
+        """Construct this sampler.
 
         Args:
-            config(SamplerConfig): Configuration which specifies how to
-                intialize workers, update agents and environments, and perform
-                rollouts.
-            agents(Agent or [Agent]): Agent(s) to use to perform rollouts. It
-                will be passed into `config.agent_update_fn` before doing any
-                rollouts. If a list is passed in, it must have length exactly
-                `config.n_workers`, and will be spread across the workers.
+            worker_factory(WorkerFactory): Pickleable factory for creating
+                workers. Should be transmitted to other processes / nodes where
+                work needs to be done, then workers should be constructed
+                there.
+            agents(Agent or [Agent]): Agent(s) to use to perform rollouts. If a
+                list is passed in, it must have length exactly
+                `worker_factory.n_workers`, and will be spread across the
+                workers.
             envs(gym.Env or [gym.Env]): Environment rollouts are performed in.
-                It will be passed into `config.env_update_fn` before doing any
-                rollouts. If a list is passed in, it must have length exactly
-                `config.n_workers`, and will be spread across the workers.
+                If a list is passed in, it must have length exactly
+                `worker_factory.n_workers`, and will be spread across the
+                workers.
 
         Returns:
             Sampler: An instance of `cls`.
@@ -39,7 +40,7 @@ class Sampler(abc.ABC):
         # This implementation works for most current implementations.
         # Relying on this implementation is deprecated, but calling this method
         # is not.
-        fake_algo = copy.copy(config)
+        fake_algo = copy.copy(worker_factory)
         fake_algo.policy = agents
         return cls(fake_algo, envs)
 
@@ -62,11 +63,11 @@ class Sampler(abc.ABC):
                 sample.
             agent_update(object): Value which will be passed into the
                 `agent_update_fn` before doing rollouts. If a list is passed
-                in, it must have length exactly `config.n_workers`, and will be
-                spread across the workers.
+                in, it must have length exactly `factory.n_workers`, and will
+                be spread across the workers.
             env_update(object): Value which will be passed into the
                 `env_update_fn` before doing rollouts. If a list is passed in,
-                it must have length exactly `config.n_workers`, and will be
+                it must have length exactly `factory.n_workers`, and will be
                 spread across the workers.
 
         Returns:

@@ -30,16 +30,16 @@ class RaySampler(Sampler):
     """
 
     def __init__(self,
-                 config,
+                 worker_factory,
                  agents,
                  envs,
                  num_processors=None,
                  sampler_worker_cls=None):
         self._sampler_worker = ray.remote(SamplerWorker if sampler_worker_cls
                                           is None else sampler_worker_cls)
-        self._config = config
+        self._worker_factory = worker_factory
         self._agents = agents
-        self._envs = self._config.get_worker_broadcast(envs)
+        self._envs = self._worker_factory.get_worker_broadcast(envs)
         if not ray.is_initialized():
             ray.init(log_to_driver=False)
         self._num_workers = (num_processors if num_processors else
@@ -53,9 +53,9 @@ class RaySampler(Sampler):
         self._idle_worker_ids = list(range(self._num_workers))
 
     @classmethod
-    def construct(cls, config, agents, envs):
-        """Construct this sampler from a config."""
-        return cls(config, agents, envs)
+    def construct(cls, worker_factory, agents, envs):
+        """Construct this sampler."""
+        return cls(worker_factory, agents, envs)
 
     def start_worker(self):
         """Initialize a new ray worker."""
@@ -65,12 +65,12 @@ class RaySampler(Sampler):
             self._workers_started = True
         # We need to pickle the agent so that we can e.g. set up the TF.Session
         # in the worker *before* unpicling it.
-        agent_pkls = self._config.get_worker_broadcast(self._agents,
-                                                       pickle.dumps)
+        agent_pkls = self._worker_factory.get_worker_broadcast(
+            self._agents, pickle.dumps)
         for worker_id in range(self._num_workers):
             self._all_workers[worker_id] = self._sampler_worker.remote(
                 worker_id, self._envs[worker_id], agent_pkls[worker_id],
-                self._config)
+                self._worker_factory)
 
     def obtain_samples(self, itr, num_samples, agent_updates,
                        env_updates=None):
@@ -90,8 +90,10 @@ class RaySampler(Sampler):
         # update the policy params of each worker before sampling
         # for the current iteration
         self._idle_worker_ids = list(range(self._num_workers))
-        param_ids = self._config.get_worker_broadcast(agent_updates, ray.put)
-        env_ids = self._config.get_worker_broadcast(env_updates, ray.put)
+        param_ids = self._worker_factory.get_worker_broadcast(
+            agent_updates, ray.put)
+        env_ids = self._worker_factory.get_worker_broadcast(
+            env_updates, ray.put)
         while self._idle_worker_ids:
             worker_id = self._idle_worker_ids.pop()
             worker = self._all_workers[worker_id]
@@ -168,26 +170,23 @@ class SamplerWorker:
         - worker_id(int): The id of the sampler_worker
         - env: The gym env
         - agent_pkl: The pickled agent
-        - config(SamplerConfig): The sampler configuration
+        - worker_factory(WorkerFactory): Factory to construct this worker's
+          behavior.
 
     """
 
-    def __init__(self, worker_id, env, agent_pkl, config):
-        config.worker_init_fn(config, worker_id)
+    def __init__(self, worker_id, env, agent_pkl, worker_factory):
+        self.inner_worker = worker_factory(worker_id)
         self.worker_id = worker_id
-        self.env = env
-        self.agent = pickle.loads(agent_pkl)
-        self.config = config
+        self.inner_worker.env = env
+        self.inner_worker.agent = pickle.loads(agent_pkl)
 
     def update(self, agent_update, env_update):
         """Update the agent and environment."""
-        self.agent = self.config.agent_update_fn(self.config, self.worker_id,
-                                                 self.agent, agent_update)
-        self.env = self.config.env_update_fn(self.config, self.worker_id,
-                                             self.env, env_update)
+        self.inner_worker.update_agent(agent_update)
+        self.inner_worker.update_env(env_update)
         return self.worker_id
 
     def rollout(self):
         """Compute one rollout of the agent in the environment."""
-        return self.config.rollout_fn(self.config, self.worker_id, self.agent,
-                                      self.env, self.config.max_path_length)
+        return (self.worker_id, ) + self.inner_worker.rollout()
