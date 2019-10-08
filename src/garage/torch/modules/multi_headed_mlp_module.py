@@ -1,4 +1,7 @@
 """MultiHeadedMLPModule."""
+import copy
+
+import torch
 import torch.nn as nn
 
 
@@ -43,7 +46,7 @@ class MultiHeadedMLPModule(nn.Module):
                  input_dim,
                  output_dims,
                  hidden_sizes,
-                 hidden_nonlinearity=nn.ReLU,
+                 hidden_nonlinearity=torch.relu,
                  hidden_w_init=nn.init.xavier_normal_,
                  hidden_b_init=nn.init.zeros_,
                  output_nonlinearities=None,
@@ -61,43 +64,31 @@ class MultiHeadedMLPModule(nn.Module):
 
         output_dims = self._check_hidden_layer_parameter(
             'output_dims', output_dims, n_heads)
-        output_nonlinearities = self._check_hidden_layer_parameter(
-            'output_nonlinearities', output_nonlinearities, n_heads)
         output_w_inits = self._check_hidden_layer_parameter(
             'output_w_inits', output_w_inits, n_heads)
         output_b_inits = self._check_hidden_layer_parameter(
             'output_b_inits', output_b_inits, n_heads)
 
+        self._hidden_nonlinearity = hidden_nonlinearity
+        self._layer_normalization = layer_normalization
+        self._output_nonlinearities = self._check_hidden_layer_parameter(
+            'output_nonlinearities', output_nonlinearities, n_heads)
+
+        self._layers = nn.ModuleList()
+
         prev_size = input_dim
         for size in hidden_sizes:
-            layer = nn.Sequential()
-            if layer_normalization:
-                layer.add_module('layer_normalization',
-                                 nn.LayerNorm(prev_size))
-
-            linear_layer = nn.Linear(prev_size, size)
-            hidden_w_init(linear_layer.weight)
-            hidden_b_init(linear_layer.bias)
-            layer.add_module('linear', linear_layer)
-
-            if hidden_nonlinearity:
-                layer.add_module('non_linearity', hidden_nonlinearity)
-
+            layer = nn.Linear(prev_size, size)
+            hidden_w_init(layer.weight)
+            hidden_b_init(layer.bias)
             self._layers.append(layer)
             prev_size = size
 
         self._output_layers = nn.ModuleList()
         for i in range(n_heads):
-            layer = nn.Sequential()
-
-            linear_layer = nn.Linear(prev_size, output_dims[i])
-            output_w_inits[i](linear_layer.weight)
-            output_b_inits[i](linear_layer.bias)
-            layer.add_module('linear', linear_layer)
-
-            if output_nonlinearities[i]:
-                layer.add_module('non_linearity', output_nonlinearities[i])
-
+            layer = nn.Linear(prev_size, output_dims[i])
+            output_w_inits[i](layer.weight)
+            output_b_inits[i](layer.bias)
             self._output_layers.append(layer)
 
     def _check_hidden_layer_parameter(self, var_name, var, n_heads):
@@ -109,7 +100,7 @@ class MultiHeadedMLPModule(nn.Module):
                       ' a collection of length n_heads ({}), but {} provided.'
                 raise ValueError(msg.format(var_name, n_heads, var))
         else:
-            var = [var] * n_heads
+            var = [copy.deepcopy(var) for _ in range(n_heads)]
 
         return var
 
@@ -118,5 +109,15 @@ class MultiHeadedMLPModule(nn.Module):
         x = input_val
         for layer in self._layers:
             x = layer(x)
+            if self._hidden_nonlinearity:
+                x = self._hidden_nonlinearity(x)
+            if self._layer_normalization:
+                x = nn.LayerNorm(x.shape[-1])(x)
 
-        return [layer(x) for layer in self._output_layers]
+        outputs = []
+        for i, layer in enumerate(self._output_layers):
+            output_x = layer(x)
+            if self._output_nonlinearities[i]:
+                output_x = self._output_nonlinearities[i](output_x)
+            outputs.append(output_x)
+        return outputs

@@ -78,15 +78,16 @@ def helper_make_inits(val):
     'input_dim, output_dim, hidden_sizes, output_w_init_vals', plain_settings)
 def test_multi_headed_mlp_module(input_dim, output_dim, hidden_sizes,
                                  output_w_init_vals):
-    module = MultiHeadedMLPModule(
-        n_heads=len(output_w_init_vals),
-        input_dim=input_dim,
-        output_dims=output_dim,
-        hidden_sizes=hidden_sizes,
-        hidden_nonlinearity=None,
-        hidden_w_init=nn.init.ones_,
-        output_nonlinearities=None,
-        output_w_inits=list(map(helper_make_inits, output_w_init_vals)))
+    module = MultiHeadedMLPModule(n_heads=len(output_w_init_vals),
+                                  input_dim=input_dim,
+                                  output_dims=output_dim,
+                                  hidden_sizes=hidden_sizes,
+                                  hidden_nonlinearity=None,
+                                  hidden_w_init=nn.init.ones_,
+                                  output_nonlinearities=None,
+                                  output_w_inits=list(
+                                      map(helper_make_inits,
+                                          output_w_init_vals)))
 
     input = torch.ones(input_dim)
     outputs = module(input)
@@ -98,19 +99,44 @@ def test_multi_headed_mlp_module(input_dim, output_dim, hidden_sizes,
 
 
 @pytest.mark.parametrize(
+    'input_dim, output_dim, hidden_sizes, output_w_init_vals', plain_settings)
+def test_multi_headed_mlp_module_with_layernorm(input_dim, output_dim,
+                                                hidden_sizes,
+                                                output_w_init_vals):
+    module = MultiHeadedMLPModule(n_heads=len(output_w_init_vals),
+                                  input_dim=input_dim,
+                                  output_dims=output_dim,
+                                  hidden_sizes=hidden_sizes,
+                                  hidden_nonlinearity=None,
+                                  layer_normalization=True,
+                                  hidden_w_init=nn.init.ones_,
+                                  output_nonlinearities=None,
+                                  output_w_inits=list(
+                                      map(helper_make_inits,
+                                          output_w_init_vals)))
+
+    input = torch.ones(input_dim)
+    outputs = module(input)
+
+    for i in range(len(outputs)):
+        assert torch.equal(outputs[i], torch.zeros((output_dim, )))
+
+
+@pytest.mark.parametrize(
     'input_dim, output_dim, hidden_sizes, output_w_init_vals',
     different_output_dims_settings)
 def test_multi_headed_mlp_module_with_different_output_dims(
         input_dim, output_dim, hidden_sizes, output_w_init_vals):
-    module = MultiHeadedMLPModule(
-        n_heads=len(output_dim),
-        input_dim=input_dim,
-        output_dims=output_dim,
-        hidden_sizes=hidden_sizes,
-        hidden_nonlinearity=None,
-        hidden_w_init=nn.init.ones_,
-        output_nonlinearities=None,
-        output_w_inits=list(map(helper_make_inits, output_w_init_vals)))
+    module = MultiHeadedMLPModule(n_heads=len(output_dim),
+                                  input_dim=input_dim,
+                                  output_dims=output_dim,
+                                  hidden_sizes=hidden_sizes,
+                                  hidden_nonlinearity=torch.relu,
+                                  hidden_w_init=nn.init.ones_,
+                                  output_nonlinearities=torch.relu,
+                                  output_w_inits=list(
+                                      map(helper_make_inits,
+                                          output_w_init_vals)))
 
     input = torch.ones(input_dim)
     outputs = module(input)
@@ -128,14 +154,28 @@ def test_multi_headed_mlp_module_with_different_output_dims(
                          invalid_settings)
 def test_invalid_settings(input_dim, output_dim, hidden_sizes, n_heads,
                           nonlinearity, w_init, b_init):
-    with pytest.raises(ValueError):
-        MultiHeadedMLPModule(
-            n_heads=n_heads,
-            input_dim=input_dim,
-            output_dims=output_dim,
-            hidden_sizes=hidden_sizes,
-            hidden_nonlinearity=None,
-            hidden_w_init=nn.init.ones_,
-            output_nonlinearities=nonlinearity,
-            output_w_inits=list(map(helper_make_inits, w_init)),
-            output_b_inits=b_init)
+
+    expected_msg_template = 'should be either an integer or a collection of ' \
+                            'length n_heads'
+    with pytest.raises(ValueError, match=expected_msg_template):
+        MultiHeadedMLPModule(n_heads=n_heads,
+                             input_dim=input_dim,
+                             output_dims=output_dim,
+                             hidden_sizes=hidden_sizes,
+                             hidden_nonlinearity=None,
+                             hidden_w_init=nn.init.ones_,
+                             output_nonlinearities=nonlinearity,
+                             output_w_inits=list(map(helper_make_inits,
+                                                     w_init)),
+                             output_b_inits=b_init)
+
+
+def test_no_head_invalid_settings():
+    expected_msg = 'n_head should be greater than or equal to 1 but 0 provided'
+    with pytest.raises(ValueError, match=expected_msg):
+        MultiHeadedMLPModule(n_heads=0,
+                             input_dim=2,
+                             output_dims=2,
+                             hidden_sizes=[32, 32],
+                             hidden_nonlinearity=None,
+                             hidden_w_init=nn.init.ones_)
