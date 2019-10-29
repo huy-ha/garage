@@ -54,9 +54,9 @@ def rollout(env,
         if deterministic:
             a = agent_info['mean']
         next_o, r, d, env_info = env.step(a)
-        observations.append(env.observation_space.flatten(o))
+        observations.append(o)
         rewards.append(r)
-        actions.append(env.action_space.flatten(a))
+        actions.append(a)
         agent_infos.append(agent_info)
         env_infos.append(env_info)
         path_length += 1
@@ -84,12 +84,16 @@ def truncate_paths(paths, max_samples):
     the list, and make the last path shorter if necessary
 
     Args:
-      paths([dict[str, np.array]])
-      max_samples(int)
+        paths (dict[str, np.ndarray]): Samples.
+        max_samples(int) : Maximum number of samples allowed.
 
     Returns:
-      A list of paths, truncated so that the number of samples adds up to
-      max-samples>
+        list[dict[str, np.ndarray]]: A list of paths, truncated so that the
+            number of samples adds up to max-samples
+
+    Raises:
+        NotImplementedError: If key other than 'observations', 'actions',
+            'rewards', 'env_infos' and 'agent_infos' are found.
 
     """
     # chop samples collected by extra paths
@@ -111,6 +115,6 @@ def truncate_paths(paths, max_samples):
                 truncated_last_path[k] = tensor_utils.truncate_tensor_dict(
                     v, truncated_len)
             else:
-                raise NotImplementedError
+                raise NotImplementedError()
         paths.append(truncated_last_path)
     return paths
