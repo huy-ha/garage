@@ -24,6 +24,8 @@ jobs:
       env: JOB_RUN_CMD="make ci-job-large"
     - name: "Verify conda and pipenv installations"
       env: JOB_RUN_CMD="make ci-job-verify-envs"
+    - name: "Verify examples"
+      env: JOB_RUN_CMD="make ci-run-examples"
     - if: type = cron
       name: "Nightly tests"
       env: JOB_RUN_CMD="make ci-job-nightly"

@@ -73,6 +73,9 @@ ci-verify-pipenv:
 	# pylint will verify all imports work
 	pipenv run pylint --disable=all --enable=import-error garage
 
+ci-run-examples:
+    scripts/travisci/check_examples.sh
+
 ci-deploy-docker:
 	echo "${DOCKER_API_KEY}" | docker login -u "${DOCKER_USERNAME}" \
 		--password-stdin
