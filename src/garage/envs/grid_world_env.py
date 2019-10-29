@@ -34,13 +34,11 @@ MAPS = {
 
 class GridWorldEnv(gym.Env, Serializable):
     """
-    'S' : starting point
-    'F' or '.': free space
-    'W' or 'x': wall
-    'H' or 'o': hole (terminates episode)
-    'G' : goal
-
-
+    | 'S' : starting point
+    | 'F' or '.': free space
+    | 'W' or 'x': wall
+    | 'H' or 'o': hole (terminates episode)
+    | 'G' : goal
     """
 
     def __init__(self, desc='4x4'):
