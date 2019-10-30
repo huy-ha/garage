@@ -4,19 +4,16 @@ pull_request_rules:
       - base=master
       - -conflict
       - "#approved-reviews-by>=2"
-      - "approved-reviews-by=maintainers"
+      - "approved-reviews-by=@maintainers"
       - "#changes-requested-reviews-by=0"
       - status-success=Travis CI - Pull Request
       - status-success=codecov/patch
       - status-success=codecov/project
-      - status-success="ci/dockercloud (/docker/Dockerfile.base.16.04)"
-      - status-success="ci/dockercloud (/docker/Dockerfile.base.18.04)"
-      - status-success="ci/dockercloud (/docker/Dockerfile.headless)"
-      - status-success="ci/dockercloud (/docker/Dockerfile.nvidia)"
       - label=ready-to-merge
     actions:
       merge:
         strict: smart
+        strict_method: rebase
         method: squash
       delete_head_branch: {}
   - name: Automatic merge queue for master (maintainers)
@@ -29,13 +26,10 @@ pull_request_rules:
       - status-success=Travis CI - Pull Request
       - status-success=codecov/patch
       - status-success=codecov/project
-      - status-success="ci/dockercloud (/docker/Dockerfile.base.16.04)"
-      - status-success="ci/dockercloud (/docker/Dockerfile.base.18.04)"
-      - status-success="ci/dockercloud (/docker/Dockerfile.headless)"
-      - status-success="ci/dockercloud (/docker/Dockerfile.nvidia)"
       - label=ready-to-merge
     actions:
       merge:
         strict: smart
+        strict_method: rebase
         method: squash
       delete_head_branch: {}
